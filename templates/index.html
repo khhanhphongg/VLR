@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Valorant Agent Pick Rate Dashboard</title>
+    <meta name="description" content="Phân tích tỷ lệ chọn tướng Valorant theo từng map trong các giải đấu chuyên nghiệp.">
+
+    <!-- [5] Bootstrap 5 — Framework CSS responsive -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Google Font — Typography chuyên nghiệp -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- [6] Chart.js — Thư viện vẽ biểu đồ -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+
+    <!-- ============================================================ -->
+    <!-- [5] CSS TỐI GIẢN — Chỉ dùng: đen, trắng, xám, đỏ Valorant -->
+    <!-- ============================================================ -->
+    <style>
+        :root {
+            --dark: #0f1923;       /* Đen Valorant */
+            --red: #ff4655;        /* Đỏ Valorant */
+            --white: #ffffff;
+            --cream: #ece8e1;      /* Nền kem nhạt */
+            --gray: #6c757d;       /* Xám phụ */
+            --gray-light: #f0edea; /* Xám rất nhạt */
+        }
+        body { background: var(--cream); color: var(--dark); font-family: 'Inter', sans-serif; }
+
+        /* Hero: nền đen đơn giản */
+        .hero { background: var(--dark); border-radius: 16px; }
+
+        /* Accent đỏ */
+        .accent { color: var(--red); }
+
+        /* Chip badge: nền đỏ nhạt, chữ đỏ */
+        .chip { background: rgba(255,70,85,0.1); color: var(--red); font-weight: 600; }
+
+        /* Card & Table: bo tròn, nền trắng */
+        .card { border-radius: 16px; overflow: hidden; background: var(--white); transition: transform 0.2s, box-shadow 0.2s; }
+        a.card:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(15,25,35,0.1) !important; }
+        .table { border-radius: 16px; overflow: hidden; font-size: 0.9rem; }
+        .table-dark { background: var(--dark); }
+
+        /* Stat card: nền trắng, chữ đỏ cho số */
+        .stat-card { text-align: center; padding: 1rem; border-radius: 12px; background: var(--white); }
+        .stat-card .stat-value { font-size: 1.4rem; font-weight: 800; color: var(--red); }
+        .stat-card .stat-label { font-size: 0.72rem; color: var(--gray); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+
+        /* Tier badge: chỉ dùng đỏ đậm → nhạt (cùng 1 tông) */
+        .tier-s { background: var(--red); color: #fff; }
+        .tier-a { background: #ff6b77; color: #fff; }
+        .tier-b { background: #ff9099; color: #fff; }
+        .tier-c { background: #ffb5bb; color: var(--dark); }
+
+        /* Role badge: đơn sắc — xám nhạt, chữ đen */
+        .role-badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 6px; font-weight: 600;
+                      background: var(--gray-light); color: var(--dark); }
+
+        /* Section title */
+        .section-title { font-size: 1rem; font-weight: 700; }
+
+        /* Footer */
+        .footer-text { font-size: 0.78rem; color: var(--gray); text-align: center; padding: 1.5rem 0 0.5rem; }
+    </style>
+</head>
+<body>
+    <main class="container py-4" style="max-width:1100px">
+
+        <!-- ============================================================ -->
+        <!-- [5] HERO BANNER                                              -->
+        <!-- ============================================================ -->
+        <section class="hero text-white p-4 p-lg-5 shadow mb-4">
+            <h1 class="display-5 fw-bold mb-1">TỶ LỆ PICK TƯỚNG VALORANT</h1>
+            <p class="mb-0" style="opacity:.6; font-size:.9rem">Dashboard phân tích dữ liệu giải đấu — Flask &amp; Pandas</p>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- [5] FORM CHỌN MAP                                            -->
+        <!-- ============================================================ -->
+        <section class="card shadow-sm border-0 p-4 mb-4">
+            <form method="get" action="{{ url_for('index') }}" class="row g-3 align-items-end">
+                <!-- [5] Dropdown chọn map -->
+                <div class="col-md-5">
+                    <label for="map" class="form-label fw-semibold">Chọn map</label>
+                    <select id="map" name="map" class="form-select form-select-lg">
+                        {% for map_name in maps %}
+                        <option value="{{ map_name }}" {% if map_name == selected_map %}selected{% endif %}>{{ map_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <!-- [9] Dropdown lọc theo vai trò (role) -->
+                <div class="col-md-4">
+                    <label for="role" class="form-label fw-semibold">Lọc theo vai trò</label>
+                    <select id="role" name="role" class="form-select form-select-lg">
+                        <option value="" {% if not selected_role %}selected{% endif %}>Tất cả vai trò</option>
+                        {% for role in available_roles %}
+                        <option value="{{ role }}" {% if role == selected_role %}selected{% endif %}>{{ role }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <button type="submit" class="btn btn-danger btn-lg w-100" style="border-radius:12px">Xem chi tiết</button>
+                </div>
+            </form>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- [3] CHI TIẾT MAP + [4] PHÂN HẠNG TIER                       -->
+        <!-- ============================================================ -->
+        {% if initial_detail %}
+        <section class="card border-0 shadow-sm p-4 mb-4">
+            <div class="row g-4 align-items-center">
+                <!-- Cột trái: Thông tin tổng quan -->
+                <div class="col-lg-5">
+                    <p class="text-uppercase text-muted mb-1" style="font-size:.75rem;letter-spacing:1px">Map đang chọn</p>
+                    <h2 class="display-6 fw-bold mb-3">{{ initial_detail.map }}</h2>
+                    <p class="mb-2">Agent nổi bật nhất: <span class="accent fw-bold">{{ initial_detail.best_agent }}</span></p>
+                    <p class="mb-2">Pick rate cao nhất: <strong>{{ initial_detail.best_rate }}%</strong></p>
+                    <p class="mb-0">Top 3: <strong>{{ initial_detail.top_three | join(', ') }}</strong></p>
+                </div>
+                <!-- Cột phải: Bảng xếp hạng agent -->
+                <div class="col-lg-7">
+                    <div class="table-responsive" style="max-height:380px;overflow-y:auto">
+                        <table class="table table-hover align-middle mb-0 bg-white">
+                            <thead class="table-dark" style="position:sticky;top:0;z-index:1">
+                                <tr>
+                                    <th>Rank</th>
+                                    <th>Agent</th>
+                                    <th>Role</th>
+                                    <th>Pick Rate</th>
+                                    <th>Tier</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for agent in initial_detail.agents %}
+                                <tr>
+                                    <td class="fw-bold">#{{ agent.rank }}</td>
+                                    <td class="fw-semibold">{{ agent.agent }}</td>
+                                    <td><span class="role-badge">{{ agent.role }}</span></td>
+                                    <td>{{ agent.pick_rate }}%</td>
+                                    <td><span class="badge rounded-pill tier-{{ agent.tier|lower }}">{{ agent.tier }}</span></td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- [3] THỐNG KÊ NÂNG CAO — 6 stat cards                        -->
+        <!-- Dữ liệu từ compute_statistics() trong main.py               -->
+        <!-- ============================================================ -->
+        <section class="row g-3 mb-4">
+            <div class="col-6 col-md-2">
+                <div class="stat-card shadow-sm">
+                    <div class="stat-value">{{ initial_detail.statistics.mean }}%</div>
+                    <div class="stat-label">Trung bình</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="stat-card shadow-sm">
+                    <div class="stat-value">{{ initial_detail.statistics.median }}%</div>
+                    <div class="stat-label">Trung vị</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="stat-card shadow-sm">
+                    <div class="stat-value">{{ initial_detail.statistics.std_dev }}</div>
+                    <div class="stat-label">Độ lệch chuẩn</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="stat-card shadow-sm">
+                    <div class="stat-value">{{ initial_detail.statistics.max }}%</div>
+                    <div class="stat-label">Cao nhất</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="stat-card shadow-sm">
+                    <div class="stat-value">{{ initial_detail.statistics.min }}%</div>
+                    <div class="stat-label">Thấp nhất</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="stat-card shadow-sm">
+                    <div class="stat-value">{{ initial_detail.statistics.range }}%</div>
+                    <div class="stat-label">Khoảng cách</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- [6] BIỂU ĐỒ TRỰC QUAN — 3 biểu đồ đơn sắc                  -->
+        <!-- ============================================================ -->
+        <div class="row g-3 mb-4">
+            <!-- Biểu đồ 1: Bar chart — Top 5 agent -->
+            <div class="col-md-5">
+                <div class="card border-0 shadow-sm p-3">
+                    <p class="section-title mb-2">Top 5 Pick Rate — {{ initial_detail.map }}</p>
+                    <div style="height:160px"><canvas id="chartBar"></canvas></div>
+                </div>
+            </div>
+            <!-- Biểu đồ 2: Doughnut — Phân bố tier -->
+            <div class="col-md-3">
+                <div class="card border-0 shadow-sm p-3">
+                    <p class="section-title mb-2">Phân bố Tier</p>
+                    <div style="height:160px"><canvas id="chartPie"></canvas></div>
+                </div>
+            </div>
+            <!-- Biểu đồ 3: Bar chart — Phân bố role -->
+            <div class="col-md-4">
+                <div class="card border-0 shadow-sm p-3">
+                    <p class="section-title mb-2">Phân bố Role</p>
+                    <div style="height:160px"><canvas id="chartRole"></canvas></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- [8] Trường hợp không có dữ liệu -->
+        {% else %}
+        <section class="card border-0 shadow-sm p-5 text-center mb-4">
+            <h2 class="h4 mb-2">Không tìm thấy dữ liệu map</h2>
+            <p class="text-muted mb-0">Hãy chọn một map hợp lệ ở phía trên.</p>
+        </section>
+        {% endif %}
+
+        <!-- ============================================================ -->
+        <!-- [3] TỔNG QUAN THEO MAP                                       -->
+        <!-- ============================================================ -->
+        <section class="mb-4">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h2 class="h4 mb-0 fw-bold">Tổng quan theo map</h2>
+                <span class="badge chip rounded-pill px-3 py-2">{{ overview|length }} map</span>
+            </div>
+            <div class="row g-3">
+                {% for item in overview %}
+                <div class="col-md-6 col-xl-4">
+                    <a class="card h-100 border-0 shadow-sm p-4 text-decoration-none text-dark" href="{{ url_for('index', map=item.map) }}">
+                        <div class="d-flex justify-content-between align-items-start mb-3">
+                            <h3 class="h5 mb-0 fw-bold">{{ item.map }}</h3>
+                            <span class="badge chip rounded-pill">{{ item.agent_count }} agents</span>
+                        </div>
+                        <p class="mb-1 text-muted" style="font-size:.8rem">Best agent</p>
+                        <p class="fs-4 fw-bold accent mb-1">{{ item.best_agent }}</p>
+                        <p class="mb-0">Pick rate cao nhất: <strong>{{ item.best_rate }}%</strong></p>
+                    </a>
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <p class="footer-text">Valorant Agent Pick Rate Dashboard &copy; 2026 — Flask + Pandas + Chart.js</p>
+    </main>
+
+<!-- ================================================================== -->
+<!-- [6] JAVASCRIPT — 3 biểu đồ, bảng màu đơn sắc (đỏ Valorant)       -->
+<!-- ================================================================== -->
+{% if initial_detail %}
+<script>
+(function(){
+    var all = {{ initial_detail.agents | tojson }};
+    var roleDist = {{ initial_detail.role_distribution | tojson }};
+
+    // --- BIỂU ĐỒ 1: Bar chart ngang — Top 5 (tông đỏ đậm → nhạt) ---
+    var top5 = all.slice(0, 5);
+    new Chart(document.getElementById('chartBar'), {
+        type: 'bar',
+        data: {
+            labels: top5.map(function(a){ return a.agent }),
+            datasets: [{
+                data: top5.map(function(a){ return a.pick_rate }),
+                backgroundColor: 'rgba(255,70,85,0.7)',
+                borderColor: '#ff4655',
+                borderWidth: 1,
+                borderRadius: 4
+            }]
+        },
+        options: {
+            indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+            animation: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { beginAtZero: true, max: 100, ticks: { callback: function(v){ return v+'%' }, font: { size: 10 } } },
+                y: { ticks: { font: { size: 10, weight: 600 } } }
+            }
+        }
+    });
+
+    // --- BIỂU ĐỒ 2: Doughnut — Tier (4 shade đỏ) ---
+    var tc = {S:0, A:0, B:0, C:0};
+    all.forEach(function(a){ tc[a.tier]++ });
+
+    new Chart(document.getElementById('chartPie'), {
+        type: 'doughnut',
+        data: {
+            labels: ['S','A','B','C'],
+            datasets: [{
+                data: [tc.S, tc.A, tc.B, tc.C],
+                backgroundColor: ['#ff4655','#ff6b77','#ff9099','#ffb5bb'],
+                borderColor: '#fff', borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false, animation: false,
+            plugins: { legend: { position: 'right', labels: { padding: 8, font: { size: 10 }, usePointStyle: true } } }
+        }
+    });
+
+    // --- BIỂU ĐỒ 3: Bar chart — Role (cùng tông đỏ) ---
+    var roleLabels = Object.keys(roleDist);
+    var roleData = Object.values(roleDist);
+
+    new Chart(document.getElementById('chartRole'), {
+        type: 'bar',
+        data: {
+            labels: roleLabels,
+            datasets: [{
+                data: roleData,
+                backgroundColor: 'rgba(255,70,85,0.6)',
+                borderColor: '#ff4655',
+                borderWidth: 1,
+                borderRadius: 4
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false, animation: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                y: { beginAtZero: true, ticks: { stepSize: 1, font: { size: 10 } } },
+                x: { ticks: { font: { size: 9, weight: 600 } } }
+            }
+        }
+    });
+})();
+</script>
+{% endif %}
+</body>
+</html>
